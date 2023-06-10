@@ -25,7 +25,7 @@ class Base(object):
     __metaclass__ = abc.ABCMeta
 
     def __init__(self, log_name='logs.txt'):
-        
+
         self.cur_epoch = 0
 
         # timer
@@ -54,7 +54,7 @@ class Trainer(Base):
             total_params += list(module.parameters())
         optimizer = torch.optim.Adam(total_params, lr=cfg.lr)
         return optimizer
-        
+
     def save_model(self, state, epoch):
         file_path = osp.join(cfg.model_dir,'snapshot_{}.pth.tar'.format(str(epoch)))
 
@@ -73,7 +73,7 @@ class Trainer(Base):
         model_file_list = glob.glob(osp.join(cfg.model_dir,'*.pth.tar'))
         cur_epoch = max([int(file_name[file_name.find('snapshot_') + 9 : file_name.find('.pth.tar')]) for file_name in model_file_list])
         ckpt_path = osp.join(cfg.model_dir, 'snapshot_' + str(cur_epoch) + '.pth.tar')
-        ckpt = torch.load(ckpt_path) 
+        ckpt = torch.load(ckpt_path)
         start_epoch = ckpt['epoch'] + 1
         model.load_state_dict(ckpt['network'], strict=False)
         #optimizer.load_state_dict(ckpt['optimizer'])
@@ -97,7 +97,7 @@ class Trainer(Base):
         for g in self.optimizer.param_groups:
             cur_lr = g['lr']
         return cur_lr
-    
+
     def _make_batch_generator(self):
         # data load and construct batch generator
         self.logger.info("Creating dataset...")
@@ -107,7 +107,7 @@ class Trainer(Base):
         trainset2d_loader = []
         for i in range(len(cfg.trainset_2d)):
             trainset2d_loader.append(eval(cfg.trainset_2d[i])(transforms.ToTensor(), "train"))
-       
+
         valid_loader_num = 0
         if len(trainset3d_loader) > 0:
             trainset3d_loader = [MultipleDatasets(trainset3d_loader, make_same_len=False)]
@@ -154,7 +154,7 @@ class Tester(Base):
         self.logger.info("Creating dataset...")
         testset_loader = eval(cfg.testset)(transforms.ToTensor(), "test")
         batch_generator = DataLoader(dataset=testset_loader, batch_size=cfg.num_gpus*cfg.test_batch_size, shuffle=False, num_workers=cfg.num_thread, pin_memory=True)
-        
+
         self.testset = testset_loader
         self.batch_generator = batch_generator
 
@@ -162,7 +162,7 @@ class Tester(Base):
         model_path = os.path.join(cfg.model_dir, 'snapshot_%d.pth.tar' % self.test_epoch)
         assert os.path.exists(model_path), 'Cannot find model at ' + model_path
         self.logger.info('Load checkpoint from {}'.format(model_path))
-        
+
         # prepare network
         self.logger.info("Creating graph...")
         model = get_model('test')
@@ -172,12 +172,10 @@ class Tester(Base):
         model.eval()
 
         self.model = model
-    
+
     def _evaluate(self, outs, cur_sample_idx):
         eval_result = self.testset.evaluate(outs, cur_sample_idx)
         return eval_result
 
     def _print_eval_result(self, eval_result):
         self.testset.print_eval_result(eval_result)
-
-

@@ -21,7 +21,7 @@ class EHF(torch.utils.data.Dataset):
         self.datalist = self.load_data()
         self.cam_param = {'R': [-2.98747896, 0.01172457, -0.05704687]}
         self.cam_param['R'], _ = cv2.Rodrigues(np.array(self.cam_param['R']))
- 
+
     def load_data(self):
         datalist = []
         db = COCO(osp.join(self.data_path, 'EHF.json'))
@@ -52,27 +52,27 @@ class EHF(torch.utils.data.Dataset):
             datalist.append(data_dict)
 
         return datalist
- 
+
     def process_hand_face_bbox(self, bbox, do_flip, img_shape, img2bb_trans):
         if bbox is None:
             bbox = np.zeros((2,2), dtype=np.float32) # dummy value
             bbox_valid = float(False) # dummy value
         else:
             # reshape to top-left (x,y) and bottom-right (x,y)
-            bbox = bbox.reshape(2,2) 
+            bbox = bbox.reshape(2,2)
 
             # flip augmentation
             if do_flip:
                 bbox[:,0] = img_shape[1] - bbox[:,0] - 1
                 bbox[0,0], bbox[1,0] = bbox[1,0].copy(), bbox[0,0].copy() # xmin <-> xmax swap
-            
+
             # make four points of the bbox
             bbox = bbox.reshape(4).tolist()
             xmin, ymin, xmax, ymax = bbox
             bbox = np.array([[xmin, ymin], [xmax, ymin], [xmax, ymax], [xmin, ymax]], dtype=np.float32).reshape(4,2)
 
             # affine transformation (crop, rotation, scale)
-            bbox_xy1 = np.concatenate((bbox, np.ones_like(bbox[:,:1])),1) 
+            bbox_xy1 = np.concatenate((bbox, np.ones_like(bbox[:,:1])),1)
             bbox = np.dot(img2bb_trans, bbox_xy1.transpose(1,0)).transpose(1,0)[:,:2]
             bbox[:,0] = bbox[:,0] / cfg.input_img_shape[1] * cfg.output_hm_shape[1]
             bbox[:,1] = bbox[:,1] / cfg.input_img_shape[0] * cfg.output_hm_shape[0]
@@ -81,7 +81,7 @@ class EHF(torch.utils.data.Dataset):
             xmin = np.min(bbox[:,0]); xmax = np.max(bbox[:,0]);
             ymin = np.min(bbox[:,1]); ymax = np.max(bbox[:,1]);
             bbox = np.array([xmin, ymin, xmax, ymax], dtype=np.float32)
-            
+
             bbox_valid = float(True)
             bbox = bbox.reshape(2,2)
 
@@ -113,7 +113,7 @@ class EHF(torch.utils.data.Dataset):
 
         # mesh gt load
         mesh_gt = load_ply(mesh_gt_path)
-    
+
         inputs = {'img': img}
         targets = {'smplx_mesh_cam': mesh_gt, 'lhand_bbox_center': lhand_bbox_center, 'rhand_bbox_center': rhand_bbox_center, 'face_bbox_center': face_bbox_center, 'lhand_bbox_size': lhand_bbox_size, 'rhand_bbox_size': rhand_bbox_size, 'face_bbox_size': face_bbox_size}
         meta_info = {'bb2img_trans': bb2img_trans, 'lhand_bbox_valid': float(True), 'rhand_bbox_valid': float(True), 'face_bbox_valid': float(True)}
@@ -126,7 +126,7 @@ class EHF(torch.utils.data.Dataset):
         for n in range(sample_num):
             annot = annots[cur_sample_idx + n]
             out = outs[n]
-            
+
             # MPVPE from all vertices
             mesh_gt = np.dot(self.cam_param['R'], out['smplx_mesh_cam_target'].transpose(1,0)).transpose(1,0)
             mesh_out = out['smplx_mesh_cam']
@@ -155,13 +155,13 @@ class EHF(torch.utils.data.Dataset):
             eval_result['pa_mpvpe_face'].append(np.sqrt(np.sum((mesh_out_face_align - mesh_gt_face)**2,1)).mean() * 1000)
             mesh_out_face_align = mesh_out_face - np.dot(smpl_x.J_regressor, mesh_out)[smpl_x.J_regressor_idx['neck'],None,:] + np.dot(smpl_x.J_regressor, mesh_gt)[smpl_x.J_regressor_idx['neck'],None,:]
             eval_result['mpvpe_face'].append(np.sqrt(np.sum((mesh_out_face_align - mesh_gt_face)**2,1)).mean() * 1000)
-           
+
             # MPJPE from body joints
             joint_gt_body = np.dot(smpl_x.j14_regressor, mesh_gt)
             joint_out_body = np.dot(smpl_x.j14_regressor, mesh_out)
             joint_out_body_align = rigid_align(joint_out_body, joint_gt_body)
             eval_result['pa_mpjpe_body'].append(np.sqrt(np.sum((joint_out_body_align - joint_gt_body)**2,1)).mean() * 1000)
-            
+
             # MPJPE from hand joints
             joint_gt_lhand = np.dot(smpl_x.orig_hand_regressor['left'], mesh_gt)
             joint_out_lhand = np.dot(smpl_x.orig_hand_regressor['left'], mesh_out)
@@ -170,7 +170,7 @@ class EHF(torch.utils.data.Dataset):
             joint_out_rhand = np.dot(smpl_x.orig_hand_regressor['right'], mesh_out)
             joint_out_rhand_align = rigid_align(joint_out_rhand, joint_gt_rhand)
             eval_result['pa_mpjpe_hand'].append((np.sqrt(np.sum((joint_out_lhand_align - joint_gt_lhand)**2,1)).mean() * 1000 + np.sqrt(np.sum((joint_out_rhand_align - joint_gt_rhand)**2,1)).mean() * 1000)/2.)
-            
+
             vis = False
             if vis:
                 img = (out['img'].transpose(1,2,0)[:,:,::-1] * 255).copy()
@@ -205,4 +205,3 @@ class EHF(torch.utils.data.Dataset):
 
         print('PA MPJPE (Body): %.2f mm' % np.mean(eval_result['pa_mpjpe_body']))
         print('PA MPJPE (Hands): %.2f mm' % np.mean(eval_result['pa_mpjpe_hand']))
-

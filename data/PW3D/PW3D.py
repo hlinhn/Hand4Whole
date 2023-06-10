@@ -37,7 +37,6 @@ class PW3D(torch.utils.data.Dataset):
             if bbox is None: continue
             data_dict = {'img_path': img_path, 'ann_id': aid, 'img_shape': (img['height'], img['width']), 'bbox': bbox, 'smpl_param': smpl_param, 'cam_param': cam_param}
             datalist.append(data_dict)
-
         return datalist
 
     def __len__(self):
@@ -46,7 +45,7 @@ class PW3D(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         data = copy.deepcopy(self.datalist[idx])
         img_path, img_shape = data['img_path'], data['img_shape']
-        
+
         # img
         img = load_img(img_path)
         bbox, smpl_param, cam_param = data['bbox'], data['smpl_param'], data['cam_param']
@@ -60,7 +59,7 @@ class PW3D(torch.utils.data.Dataset):
         targets = {'smpl_mesh_cam': smpl_mesh_cam_orig}
         meta_info = {}
         return inputs, targets, meta_info
-        
+
     def evaluate(self, outs, cur_sample_idx):
         annots = self.datalist
         sample_num = len(outs)
@@ -77,7 +76,7 @@ class PW3D(torch.utils.data.Dataset):
                 cv2.imwrite(file_name + '.jpg', img)
                 save_obj(out['smplx_mesh_cam'], smpl_x.face, file_name + '.obj')
                 """
-                
+
                 """
                 img_path = annot['img_path']
                 img = load_img(img_path)[:,:,::-1]
@@ -92,7 +91,7 @@ class PW3D(torch.utils.data.Dataset):
                 #img = cv2.resize(img, (512,512))
                 cv2.imwrite(img_id + '_' + str(ann_id) + '.jpg', img)
                 """
-                
+
                 ann_id = annot['ann_id']
                 bbox = annot['bbox']
                 focal = list(cfg.focal)
@@ -107,11 +106,7 @@ class PW3D(torch.utils.data.Dataset):
                 with open(str(ann_id) + '.json', 'w') as f:
                     json.dump(param_save, f)
 
-
         return eval_result
 
     def print_eval_result(self, eval_result):
         pass
-
-
-
