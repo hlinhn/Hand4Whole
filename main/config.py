@@ -4,19 +4,24 @@ import sys
 import numpy as np
 
 class Config:
-    
+
     ## dataset (use names in the `data` folder)
     trainset_3d = ['Human36M']
-    trainset_2d = ['MSCOCO', 'MPII'] 
-    testset = 'EHF'
+    trainset_2d = ['MSCOCO', 'MPII']
+    testset = 'UBody'
+
+    train_sample_interval = 10
+    test_sample_interval = 80
+    make_same_len = False
+    ubody_finetune = False
 
     ## model setting
     resnet_type = 50
     hand_resnet_type = 50
     face_resnet_type = 18
-    
+
     ## input, output
-    input_img_shape = (512, 384) 
+    input_img_shape = (512, 384)
     input_body_shape = (256, 192)
     output_hm_shape = (8, 8, 6)
     input_hand_shape = (256, 256)
@@ -36,14 +41,15 @@ class Config:
     train_batch_size = 24
 
     ## testing config
-    test_batch_size = 64
+    test_batch_size = 16
 
     ## others
     num_thread = 16
     gpu_ids = '0'
     num_gpus = 1
     continue_train = False
-    
+    vis = False
+
     ## directory
     cur_dir = osp.dirname(os.path.abspath(__file__))
     root_dir = osp.join(cur_dir, '..')
@@ -54,7 +60,7 @@ class Config:
     log_dir = osp.join(output_dir, 'log')
     result_dir = osp.join(output_dir, 'result')
     human_model_path = osp.join(root_dir, 'common', 'utils', 'human_model_files')
-    
+
     def set_args(self, gpu_ids, lr=1e-4, continue_train=False):
         self.gpu_ids = gpu_ids
         self.num_gpus = len(self.gpu_ids.split(','))

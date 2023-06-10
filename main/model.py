@@ -42,6 +42,28 @@ class Model(nn.Module):
         cam_trans = torch.cat((t_xy, t_z[:,None]),1)
         return cam_trans
 
+    def generate_mesh_gt(self, targets, mode):
+        if 'smplx_mesh_cam' in targets:
+            return targets['smplx_mesh_cam']
+        nums = [3, 63, 45, 45, 3]
+        accu = []
+        temp = 0
+        for num in nums:
+            temp += num
+            accu.append(temp)
+        pose = targets['smplx_pose']
+        root_pose, body_pose, lhand_pose, rhand_pose, jaw_pose = \
+            pose[:, :accu[0]], pose[:, accu[0]:accu[1]], pose[:, accu[1]:accu[2]], pose[:, accu[2]:accu[3]], pose[:,accu[3]:accu[4]]
+        shape = targets['smplx_shape']
+        expr = targets['smplx_expr']
+        cam_trans = targets['smplx_cam_trans']
+
+        # final output
+        joint_proj, joint_cam, mesh_cam = self.get_coord(root_pose, body_pose, lhand_pose, rhand_pose, jaw_pose, shape,
+                                                         expr, cam_trans, mode)
+
+        return mesh_cam
+
     def get_coord(self, root_pose, body_pose, lhand_pose, rhand_pose, jaw_pose, shape, expr, cam_trans, mode):
         batch_size = root_pose.shape[0]
         zero_pose = torch.zeros((1,3)).float().cuda().repeat(batch_size,1) # eye poses
@@ -63,7 +85,7 @@ class Model(nn.Module):
         x = x / cfg.input_body_shape[1] * cfg.output_hm_shape[2]
         y = y / cfg.input_body_shape[0] * cfg.output_hm_shape[1]
         joint_proj = torch.stack((x,y),2)
-        
+
         # root-relative 3D coordinates
         root_cam = joint_cam[:,smpl_x.root_joint_idx,None,:]
         joint_cam = joint_cam - root_cam
@@ -96,10 +118,10 @@ class Model(nn.Module):
         # backbone
         body_img = F.interpolate(inputs['img'], cfg.input_body_shape)
         img_feat = self.backbone(body_img)
- 
+
         # body
         body_joint_hm, body_joint_img = self.body_position_net(img_feat)
-        
+
         # hand/face bbox and feature extraction
         lhand_bbox_center, lhand_bbox_size, rhand_bbox_center, rhand_bbox_size, face_bbox_center, face_bbox_size = self.box_net(img_feat, body_joint_hm.detach(), body_joint_img.detach())
         lhand_bbox = restore_bbox(lhand_bbox_center, lhand_bbox_size, cfg.input_hand_shape[1]/cfg.input_hand_shape[0], 2.0).detach() # xyxy in (cfg.input_body_shape[1], cfg.input_body_shape[0]) space
@@ -124,7 +146,7 @@ class Model(nn.Module):
         rhand_joint_img = hand_joint_img[batch_size:,:,:]
         # restore flipped left hand joint rotations
         batch_size = hand_pose.shape[0]//2
-        lhand_pose = hand_pose[:batch_size,:].reshape(-1,len(smpl_x.orig_joint_part['lhand']),3) 
+        lhand_pose = hand_pose[:batch_size,:].reshape(-1,len(smpl_x.orig_joint_part['lhand']),3)
         lhand_pose = torch.cat((lhand_pose[:,:,0:1], -lhand_pose[:,:,1:3]),2).view(batch_size,-1)
         rhand_pose = hand_pose[batch_size:,:]
         # restore flipped left hand features
@@ -141,12 +163,15 @@ class Model(nn.Module):
         # face
         expr, jaw_pose = self.face_regressor(face_feat)
         jaw_pose = rot6d_to_axis_angle(jaw_pose)
-        
+
         # final output
         joint_proj, joint_cam, mesh_cam = self.get_coord(root_pose, body_pose, lhand_pose, rhand_pose, jaw_pose, shape, expr, cam_trans, mode)
         pose = torch.cat((root_pose, body_pose, lhand_pose, rhand_pose, jaw_pose),1)
         joint_img = torch.cat((body_joint_img, lhand_joint_img, rhand_joint_img),1)
-        
+
+        if mode == 'test' and'smplx_pose' in targets:
+            mesh_pseudo_gt = self.generate_mesh_gt(targets, mode)
+
         if mode == 'train':
             # loss functions
             loss = {}
@@ -166,14 +191,14 @@ class Model(nn.Module):
                     y = targets[coord_name][:,smpl_x.joint_part[part_name],1]
                     z = targets[coord_name][:,smpl_x.joint_part[part_name],2]
                     trunc = meta_info[trunc_name][:,smpl_x.joint_part[part_name],0]
-                    
+
                     x -= (bbox[:,None,0] / cfg.input_body_shape[1] * cfg.output_hm_shape[2])
                     x *= (cfg.output_hand_hm_shape[2] / ((bbox[:,None,2] - bbox[:,None,0]) / cfg.input_body_shape[1] * cfg.output_hm_shape[2]))
                     y -= (bbox[:,None,1] / cfg.input_body_shape[0] * cfg.output_hm_shape[1])
                     y *= (cfg.output_hand_hm_shape[1] / ((bbox[:,None,3] - bbox[:,None,1]) / cfg.input_body_shape[0] * cfg.output_hm_shape[1]))
                     z *= cfg.output_hand_hm_shape[0] / cfg.output_hm_shape[0]
                     trunc *= ((x >= 0) * (x < cfg.output_hand_hm_shape[2]) * (y >= 0) * (y < cfg.output_hand_hm_shape[1]))
-                    
+
                     coord = torch.stack((x,y,z),2)
                     trunc = trunc[:,:,None]
                     targets[coord_name] = torch.cat((targets[coord_name][:,:smpl_x.joint_part[part_name][0],:], coord, targets[coord_name][:,smpl_x.joint_part[part_name][-1]+1:,:]),1)
@@ -183,12 +208,12 @@ class Model(nn.Module):
             for part_name, bbox in (('lhand', lhand_bbox), ('rhand', rhand_bbox)):
                 x = joint_proj[:,smpl_x.joint_part[part_name],0]
                 y = joint_proj[:,smpl_x.joint_part[part_name],1]
-                
+
                 x -= (bbox[:,None,0] / cfg.input_body_shape[1] * cfg.output_hm_shape[2])
                 x *= (cfg.output_hand_hm_shape[2] / ((bbox[:,None,2] - bbox[:,None,0]) / cfg.input_body_shape[1] * cfg.output_hm_shape[2]))
                 y -= (bbox[:,None,1] / cfg.input_body_shape[0] * cfg.output_hm_shape[1])
                 y *= (cfg.output_hand_hm_shape[1] / ((bbox[:,None,3] - bbox[:,None,1]) / cfg.input_body_shape[0] * cfg.output_hm_shape[1]))
-                 
+
                 coord = torch.stack((x,y),2)
                 trans = []
                 for bid in range(coord.shape[0]):
@@ -213,7 +238,7 @@ class Model(nn.Module):
             trans = torch.stack(trans)[:,None,:]
             coord = coord + trans # global translation alignment
             joint_proj = torch.cat((joint_proj[:,:smpl_x.joint_part['face'][0],:], coord, joint_proj[:,smpl_x.joint_part['face'][-1]+1:,:]),1)
-            
+
             loss['joint_proj'] = self.coord_loss(joint_proj, targets['joint_img'][:,:,:2], meta_info['joint_trunc'])
             loss['joint_img'] = self.coord_loss(joint_img, smpl_x.reduce_joint_set(targets['joint_img']), smpl_x.reduce_joint_set(meta_info['joint_trunc']), meta_info['is_3D'])
             loss['smplx_joint_img'] = self.coord_loss(joint_img, smpl_x.reduce_joint_set(targets['smplx_joint_img']), smpl_x.reduce_joint_set(meta_info['smplx_joint_trunc']))
@@ -250,10 +275,12 @@ class Model(nn.Module):
             out['lhand_bbox'] = lhand_bbox
             out['rhand_bbox'] = rhand_bbox
             out['face_bbox'] = face_bbox
+            if 'smplx_pose' in targets:
+                out['smplx_mesh_cam_pseudo_gt'] = mesh_pseudo_gt
             if 'smplx_mesh_cam' in targets:
                 out['smplx_mesh_cam_target'] = targets['smplx_mesh_cam']
-            if 'smpl_mesh_cam' in targets:
-                out['smpl_mesh_cam_target'] = targets['smpl_mesh_cam']
+            # if 'smpl_mesh_cam' in targets:
+                # out['smpl_mesh_cam_target'] = targets['smpl_mesh_cam']
             if 'bb2img_trans' in meta_info:
                 out['bb2img_trans'] = meta_info['bb2img_trans']
             return out
@@ -279,12 +306,12 @@ def get_model(mode):
     body_position_net = PositionNet('body', cfg.resnet_type)
     body_rotation_net = RotationNet('body', cfg.resnet_type)
     box_net = BoxNet()
-     
+
     hand_backbone = ResNetBackbone(cfg.hand_resnet_type)
     hand_roi_net = HandRoI(hand_backbone)
     hand_position_net = PositionNet('hand', cfg.hand_resnet_type)
     hand_rotation_net = RotationNet('hand', cfg.hand_resnet_type)
- 
+
     face_backbone = ResNetBackbone(cfg.face_resnet_type)
     face_roi_net = FaceRoI(face_backbone)
     face_regressor = FaceRegressor()
@@ -299,7 +326,7 @@ def get_model(mode):
         hand_backbone.init_weights()
         hand_position_net.apply(init_weights)
         hand_rotation_net.apply(init_weights)
-        
+
         face_roi_net.apply(init_weights)
         face_backbone.init_weights()
         face_regressor.apply(init_weights)
